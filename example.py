@@ -1,3 +1,3 @@
 #!/usr/bin/env python
 import mkipp
-mkipp.kipp_plot(LOGS_DIR = "LOGS", LAST_PROFILE = 100, PROFILE_STEP = 1)
+mkipp.kipp_plot(None, logs_dir = "../LOGS", profile_numbers = range(1,140), identifiers = ["eps_nuc"])
