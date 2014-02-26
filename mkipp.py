@@ -191,7 +191,7 @@ def kipp_plot(
 
        #fill up positions
        if yaxis_normalize:
-           max_y = 1.0
+           max_y = star_mass = star_radius = 1.0
        elif yaxis == "mass":
            star_mass = prof.header_attr.get('star_mass')
            max_y = star_mass
@@ -248,7 +248,7 @@ def kipp_plot(
    mix_data = []
    histories = []
    if len(history_names) == 0:
-       history_names.append(logs_dir + "/" + "history.data")
+       history_names = [logs_dir + "/" + "history.data"]
    for history_name in history_names:
        print history_name
        histories.append(ms.history_data(".", slname = history_name))
