@@ -88,6 +88,8 @@ def default_extractor(identifier, scale, prof):
 ########END SUPPORT CLASSES AND FUNCTIONS##########
 ###################################################
 
+#kipp_plot: Plots a Kippenhahn diagram into the matplotlib axis given. No decoration
+#           done (i.e. axis labeling or colorbars)
 def kipp_plot(
    axis, #matplotlib axis where data will be plotted
    ######## MESA DATA
@@ -145,8 +147,6 @@ def kipp_plot(
    show_semi = True,
    # Visualize Overshoot Regions
    show_over = True,
-   # Visualize Contours of Constant Omega (in microHz)
-   show_omega = False,
    # Visualize Rotationally Mixed Regions
    show_rot = False,
    ######## PLOT PARAMETERS
@@ -319,7 +319,7 @@ def kipp_plot(
            if not exists:
                z = Zone(previous_x,current_x,min_y_coord,max_y_coord,mix_type)
                open_zones.append(z)
-       #separate zones which didn't continue here
+       #separate zones which didn't continue here so we don't need to check them all the time
        for z in open_zones:
            if z.checked == False:
                zones.append(z)
@@ -372,3 +372,130 @@ def kipp_plot(
    axis.plot(x_coords[:i], y_coords[:i], "k-")
 
    return plots
+
+#Special extractors for default plots
+
+def nucneu_extractor(identifier, scale, prof):
+    eps_nuc = prof.get('eps_nuc')
+    eps_neu = prof.get('eps_neu')
+    return np.log10(eps_nuc - eps_neu)
+
+def Bfield_extractor(identifier, scale, prof):
+    log_conv_vel = prof.get('log_conv_vel')
+    conv_vel  = 10**(log_conv_vel)
+    density   = prof.get('logRho')
+    return ((10**density)**0.5)*((2.0*pi)**0.5)*conv_vel
+
+#full_kipp_plot: Uses kipp_plot but adds default decorations and default plotting options.
+#                All options except for "contour_plots", "save_file" and "save_filename"
+#                are fed directly into kipp_plot
+def decorated_kipp_plot(
+   ######## MESA DATA
+   #Directory with profile and history data
+   logs_dir = 'LOGS',
+   #List of profile numbers to be plotted. TODO: automate if not specified
+   profile_numbers = [],
+   #List of tuples containing logs_dir and profile number. If used logs_dir and
+   #profile_numbers is ignored. Use if data is spread accross different logs dirs.
+   profile_names = [],
+   #List of paths to history.data files to use instead of default one. Use in case data
+   #is spread among many history.data files, or you have a single one with non-default
+   #location or naming.
+   history_names = [],
+
+   ######## CONTOURS TO PLOT
+   #Strings with contours to plot. Possible choices are
+   #- eps_nuc          : Nuclear energy generation rate
+   #- eps_neu          : Neutrino losses
+   #- eps_nuc-eps_neu  : Duh
+   #- B_field          : Equipartition B field
+   #- conv_vel         : Convective velocity
+   #- D_ST             : Spruit_Taylor diffusion coeff.
+   #- D_DSI            : Dynamical shear instability diffusion coeff.
+   #- D_ES             : Eddington Sweet diffusion coeff.
+   contour_plots = [],
+
+   ######## PLOT OPTIONS (Note Python is case sensitive: True/False)
+   # Either "model_number" or "star_age"
+   xaxis = "model_number",
+   # Xaxis is Log (t_end - t) # TODO: Needs to be implemented
+   xaxis_log_time = False,
+   # Either "mass" or "radius"
+   yaxis = "mass",
+   #Normalize yaxis at each point using total mass/total radius
+   yaxis_normalize = False,
+   # Visualize Convective Regions
+   show_conv = True,
+   # Visualize Thermohaline Regions
+   show_therm = True,
+   # Visualize Semiconvective Regions
+   show_semi = True,
+   # Visualize Overshoot Regions
+   show_over = True,
+   # Visualize Rotationally Mixed Regions
+   show_rot = False,
+   ######## PLOT PARAMETERS
+   #Resolution in yaxis (Standard value: 300. Increase for higher res)
+   #Y direction is divided in this amount of points, and data is interpolated
+   #in between.
+   numy = 300,
+   # To discard tiny convective regions in mass and/or radius. Value represents
+   # fraction of total mass or radius
+   mass_tolerance = 0.001,
+   radius_tolerance = 0.001,
+
+   #Options for file saving. If not saving a file, a plt.show() is done
+   save_file = True,
+   save_filename = "Kippenhahn.pdf"
+):
+    identifiers = []
+    extractors = []
+    scales = []
+    levels_scale = []
+    contour_cmaps = []
+    settings = { 
+            "eps_nuc" : ["eps_nuc", default_extractor, "log", "log", "Blues"],
+            "eps_neu" : ["eps_neu", default_extractor, "log", "log", "Purples"],
+            "eps_nuc-eps_neu" : ["eps_nuc-eps_neu", nucneu_extractor, "log", "log", "Blues"],
+            "Bfield" : ["Bfield", Bfield_extractor, "log", "log", "Purples"],
+            "conv_vel" : ["log_conv_vel", default_extractor, "linear", "log", "Oranges"],
+            "D_ST" : ["am_log_D_ST", default_extractor, "linear", "log", "Greens"],
+            "D_DSI" : ["am_log_D_DSI", default_extractor, "linear", "log", "Oranges"],
+            "D_ES" : ["am_log_D_ES", default_extractor, "linear", "log", "Reds"],
+            }
+    for contour_plot in contour_plots:
+        identifiers.append(settings[contour_plot][0])
+        extractors.append(settings[contour_plot][1])
+        scales.append(settings[contour_plot][2])
+        levels_scale.append(settings[contour_plot][3])
+        contour_cmaps.append(plt.get_cmap(settings[contour_plot][4]))
+
+    #create plot
+    fig = plt.figure()
+    axis = fig.add_subplot(111)
+    plots = kipp_plot(axis, logs_dir = logs_dir, profile_numbers = profile_numbers, profile_names = profile_names,
+            history_names = history_names, identifiers = identifiers, extractors = extractors,
+            scales = scales, contour_cmaps = contour_cmaps, levels_scale = levels_scale,
+            xaxis = xaxis, xaxis_log_time = xaxis_log_time, yaxis = yaxis, yaxis_normalize = yaxis_normalize,
+            show_conv = show_conv, show_therm = show_therm, show_semi = show_semi, show_over = show_over,
+            show_rot = show_rot, numy = numy, mass_tolerance = mass_tolerance, radius_tolerance = radius_tolerance)
+
+    #add colorbars
+    labels = {
+            "eps_nuc" : 'Nuclear Energy generation,  Log (erg/g/s)',
+            "eps_neu" :'Neutrino Losses,  Log (erg/g/s)',
+            "eps_nuc-eps_neu" : '$\epsilon_{nuc}-\epsilon_{\\nu}$,  Log (erg/g/s)',
+            "Bfield" : 'Equipartition B-Field,  Log B (G)',
+            "log_conv_vel" : 'blabla',
+            "am_log_D_ST" : 'Spruit-Tayler Dynamo,  Log D (cm$^2$/s)',
+            "am_log_D_DSI" : 'Dynamical Shear,  Log D (cm$^2$/s)',
+            "am_log_D_ES" : 'Eddington-Sweet,  Log D (cm$^2$/s)'
+            }
+    for key, plot in plots.iteritems():
+        bar = plt.colorbar(plot,pad=0.05)
+        bar.set_label(labels[key])
+
+    if save_file:
+        plt.savefig(save_filename)
+    else:
+        plt.show()
