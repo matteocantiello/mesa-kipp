@@ -7,6 +7,7 @@ History: SimpleMesaKippy.py, Author: Alfred Gautschy /23.VIII.2012
          MKippi.py, Author: Matteo Cantiello /V.2013 (Added LOSSES. Color/Line Style inspired by convplot.pro IDL routine of A.Heger) 
                                              /VI.2013 (Added RADIUS, TIME and NORMALIZE Options. OMEGA Allows to plot w-contours)   
                                              /VII.2013 (Tentatively added Rotational diff. coefficients,conv. velocities and Equipartition B-field)
+         mkipp.py, Author: Pablo Marchant /II.2014 (full rewrite, code cleanup and now works as a module, not a script)
 Requirements: mesa.py. Also needs history.data and profiles.data containing 
               History (star_age,model_number, mixing_regions, mix_relr_regions)
               Profile (star_mass,photosphere_r,q,radius,eps_nuc,non_nuc_neu,logRho,
@@ -89,7 +90,7 @@ def default_extractor(identifier, scale, prof):
 ###################################################
 
 #kipp_plot: Plots a Kippenhahn diagram into the matplotlib axis given. No decoration
-#           done (i.e. axis labeling or colorbars)
+#           done (i.e. axis labeling or colorbars). Returns
 def kipp_plot(
    axis, #matplotlib axis where data will be plotted
    ######## MESA DATA
@@ -133,6 +134,8 @@ def kipp_plot(
    ######## PLOT OPTIONS (Note Python is case sensitive: True/False)
    # Either "model_number" or "star_age"
    xaxis = "model_number",
+   #xaxis is divided by this value. Use to avoid fully writing gigayears or so
+   xaxis_divide = 1,
    # Xaxis is Log (t_end - t) # TODO: Needs to be implemented
    xaxis_log_time = False,
    # Either "mass" or "radius"
@@ -184,7 +187,7 @@ def kipp_plot(
            prof=ms.mesa_profile(profile_name[0], profile_name[1], num_type='profile_num')
        except IOError as e:
            print "Couldn't open profile number " + str(profile_name[1]) + " in folder " + profile_name[0]
-       x_coord = prof.header_attr.get(xaxis)
+       x_coord = prof.header_attr.get(xaxis) / xaxis_divide
        if x_coord < max_x_coord:
            print "Profiles are not ordered in X coordinate!!!"
        max_x_coord = max(max_x_coord,x_coord)
@@ -254,7 +257,7 @@ def kipp_plot(
        histories.append(ms.history_data(".", slname = history_name))
    x_coords = []
    for history in histories:
-       x_coords.extend(history.get(xaxis))
+       x_coords.extend(history.get(xaxis) / xaxis_divide)
    y_coords = []
    if yaxis_normalize:
        y_coords = [1.0]*len(x_coords)
@@ -371,15 +374,13 @@ def kipp_plot(
            break
    axis.plot(x_coords[:i], y_coords[:i], "k-")
 
-   return plots
+   return plots, histories
 
 #Special extractors for default plots
-
 def nucneu_extractor(identifier, scale, prof):
     eps_nuc = prof.get('eps_nuc')
     eps_neu = prof.get('eps_neu')
     return np.log10(eps_nuc - eps_neu)
-
 def Bfield_extractor(identifier, scale, prof):
     log_conv_vel = prof.get('log_conv_vel')
     conv_vel  = 10**(log_conv_vel)
@@ -387,7 +388,7 @@ def Bfield_extractor(identifier, scale, prof):
     return ((10**density)**0.5)*((2.0*pi)**0.5)*conv_vel
 
 #full_kipp_plot: Uses kipp_plot but adds default decorations and default plotting options.
-#                All options except for "contour_plots", "save_file" and "save_filename"
+#                All options except for "contour_plots", "core_masses", "save_file" and "save_filename"
 #                are fed directly into kipp_plot
 def decorated_kipp_plot(
    ######## MESA DATA
@@ -414,6 +415,10 @@ def decorated_kipp_plot(
    #- D_DSI            : Dynamical shear instability diffusion coeff.
    #- D_ES             : Eddington Sweet diffusion coeff.
    contour_plots = [],
+   #Strings with core masses to plot. Options are "He", "C" and "O". Only for yaxis=mass
+   core_masses = [],
+   #Units for time axis, choices are "yr", "1000 yr", "Myr", "Gyr"
+   time_units = "yr",
 
    ######## PLOT OPTIONS (Note Python is case sensitive: True/False)
    # Either "model_number" or "star_age"
@@ -444,7 +449,7 @@ def decorated_kipp_plot(
    mass_tolerance = 0.001,
    radius_tolerance = 0.001,
 
-   #Options for file saving. If not saving a file, a plt.show() is done
+   #Options for file saving. If not saving a file, a plt.show() is done.
    save_file = True,
    save_filename = "Kippenhahn.pdf"
 ):
@@ -470,15 +475,39 @@ def decorated_kipp_plot(
         levels_scale.append(settings[contour_plot][3])
         contour_cmaps.append(plt.get_cmap(settings[contour_plot][4]))
 
+    xaxis_divide = 1
+    if xaxis == "star_age":
+        if time_units == "1000 yr":
+            xaxis_divide = 1000
+        elif time_units == "Myr":
+            xaxis_divide = 1e6
+        elif time_units == "Gyr":
+            xaxis_divide = 1e9
+
     #create plot
     fig = plt.figure()
     axis = fig.add_subplot(111)
-    plots = kipp_plot(axis, logs_dir = logs_dir, profile_numbers = profile_numbers, profile_names = profile_names,
+    plots, histories = kipp_plot(axis, logs_dir = logs_dir, profile_numbers = profile_numbers, profile_names = profile_names,
             history_names = history_names, identifiers = identifiers, extractors = extractors,
             scales = scales, contour_cmaps = contour_cmaps, levels_scale = levels_scale,
-            xaxis = xaxis, xaxis_log_time = xaxis_log_time, yaxis = yaxis, yaxis_normalize = yaxis_normalize,
+            xaxis = xaxis, xaxis_divide = xaxis_divide, xaxis_log_time = xaxis_log_time, yaxis = yaxis, yaxis_normalize = yaxis_normalize,
             show_conv = show_conv, show_therm = show_therm, show_semi = show_semi, show_over = show_over,
             show_rot = show_rot, numy = numy, mass_tolerance = mass_tolerance, radius_tolerance = radius_tolerance)
+
+    #add core masses
+    if yaxis == "mass":
+        for core_mass in core_masses:
+            if core_mass == "He":
+                field_name = "he_core_mass"
+                color = "b:"
+            elif core_mass == "C":
+                field_name = "c_core_mass"
+                color = "r:"
+            elif core_mass == "O":
+                field_name = "o_core_mass"
+                color = "g:"
+            for history in histories:
+                axis.plot(history.get(xaxis) / xaxis_divide, history.get(field_name), color)
 
     #add colorbars
     labels = {
@@ -486,7 +515,7 @@ def decorated_kipp_plot(
             "eps_neu" :'Neutrino Losses,  Log (erg/g/s)',
             "eps_nuc-eps_neu" : '$\epsilon_{nuc}-\epsilon_{\\nu}$,  Log (erg/g/s)',
             "Bfield" : 'Equipartition B-Field,  Log B (G)',
-            "log_conv_vel" : 'blabla',
+            "log_conv_vel" : 'convection velocity Log (cm/sec)',
             "am_log_D_ST" : 'Spruit-Tayler Dynamo,  Log D (cm$^2$/s)',
             "am_log_D_DSI" : 'Dynamical Shear,  Log D (cm$^2$/s)',
             "am_log_D_ES" : 'Eddington-Sweet,  Log D (cm$^2$/s)'
@@ -494,6 +523,22 @@ def decorated_kipp_plot(
     for key, plot in plots.iteritems():
         bar = plt.colorbar(plot,pad=0.05)
         bar.set_label(labels[key])
+
+    #add axis labels
+    if xaxis == "star_age":
+        axis.set_xlabel(r'$t$ ('+time_units+')')
+    else:
+        axis.set_xlabel(r'$Model Number$')
+    if yaxis == "radius":
+        if yaxis_normalize:
+            axis.set_ylabel(r'$r/R$')
+        else:   
+            axis.set_ylabel(r'$r/R_\odot$')
+    else:
+        if yaxis_normalize:
+            axis.set_ylabel(r'$m/M$')
+        else:   
+            axis.set_ylabel(r'$m/M_\odot$')
 
     if save_file:
         plt.savefig(save_filename)

@@ -12,4 +12,5 @@ import matplotlib.pyplot as plt
 #bar=plt.colorbar(plots["h1"],pad=0.01)
 #bar.set_label('h1')
 #plt.show()
-mkipp.decorated_kipp_plot(logs_dir = "../LOGS", profile_numbers = range(1,30), contour_plots = ["eps_nuc"])
+mkipp.decorated_kipp_plot(logs_dir = "../LOGS", profile_numbers = range(1,111), contour_plots = ["eps_nuc"], core_masses = ["He","C","O"], \
+        xaxis = "star_age", time_units = "Myr")
