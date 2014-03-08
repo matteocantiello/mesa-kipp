@@ -7,7 +7,8 @@ History: SimpleMesaKippy.py, Author: Alfred Gautschy /23.VIII.2012
          MKippi.py, Author: Matteo Cantiello /V.2013 (Added LOSSES. Color/Line Style inspired by convplot.pro IDL routine of A.Heger) 
                                              /VI.2013 (Added RADIUS, TIME and NORMALIZE Options. OMEGA Allows to plot w-contours)   
                                              /VII.2013 (Tentatively added Rotational diff. coefficients,conv. velocities and Equipartition B-field)
-         mkipp.py, Author: Pablo Marchant /II.2014 (full rewrite, code cleanup and now works as a module, not a script)
+         mkipp.py, Author: Pablo Marchant    /II.2014 (full rewrite, code cleanup and now works as a module, not a script)
+                                             /III.2014 (enhancement of mixing regions ploting to deal with holes and merging regions)
 Requirements: mesa.py. Also needs history.data and profiles.data containing 
               History (star_age,model_number, mixing_regions, mix_relr_regions)
               Profile (star_mass,photosphere_r,q,radius,eps_nuc,non_nuc_neu,logRho,
@@ -19,7 +20,8 @@ from math import log10, pi
 
 #matplotlib specifics
 import matplotlib.pyplot as plt
-from matplotlib.patches import Polygon
+from matplotlib.path import Path
+from matplotlib.patches import PathPatch
 #--------------------------------------------------
 #...Allow for using TeX mode in matplotlib Figures
 #--------------------------------------------------
@@ -32,34 +34,101 @@ rc('text', usetex=True)
 ###################################################
 
 # Class used to store mixing zones
+class Zone_Block:
+    def __init__(self, min_x, max_x, min_y, max_y):
+        #vertices for this block, in the order:
+        #-lower left
+        #-upper left
+        #-upper right
+        #-lower right
+        self.vertices = [
+                Zone_Vertex((min_x,min_y)),
+                Zone_Vertex((min_x,max_y)),
+                Zone_Vertex((max_x,max_y)),
+                Zone_Vertex((max_x,min_y))]
+        for i, vertex in enumerate(self.vertices):
+            vertex.prev_vertex = self.vertices[i-1]
+            vertex.next_vertex = self.vertices[(i+1)%4]
+
+class Zone_Vertex:
+    def __init__(self, coords):
+        self.coords = coords
+        self.prev_vertex = None
+        self.next_vertex = None
+        self.checked = False
+
 class Zone:
-    def __init__(self,min_x,max_x,min_y,max_y,mix_type):
-        self.items = [[min_x, max_x, min_y, max_y]]
+    def __init__(self, block, mix_type):
+        self.old_blocks = []
+        self.last_blocks = []
+        self.new_blocks = [block]
         self.mix_type = mix_type
-        self.checked = True
-    #Check if region is a continuation of the current zone
-    def check_region(self,min_x,max_x,min_y,max_y,mix_type):
-        last_max_y = self.items[-1][3]
-        last_min_y = self.items[-1][2]
-        if mix_type!=self.mix_type:
+        self.open = True
+
+    def extend(self, upper_vertex, lower_vertex, mix_type):
+        if mix_type != self.mix_type:
             return False
-        if (max_y >= last_max_y and last_max_y > min_y) or (last_max_y >= max_y and max_y > last_min_y):
-            self.items.append([min_x, max_x, min_y, max_y])
-            self.checked = True
-            return True
-        return False
-    #Creates polygon used to plot hatch
-    def get_zone_vertices(self):
+        found = False
+        for block in self.last_blocks:
+            old_upper = block.vertices[2]
+            old_lower = old_upper.next_vertex
+            old_max_y = old_upper.coords[1]
+            old_min_y = old_lower.coords[1]
+            new_max_y = upper_vertex.coords[1]
+            new_min_y = lower_vertex.coords[1]
+            if (new_max_y <= old_max_y and new_max_y >= old_min_y) or \
+               (new_min_y <= old_max_y and new_min_y >= old_min_y) or \
+               (new_max_y > old_max_y and new_min_y < old_min_y):
+               #associate vertices
+               old_upper.next_vertex = upper_vertex
+               upper_vertex.prev_vertex = old_upper
+               lower_vertex.next_vertex = old_lower
+               old_lower.prev_vertex = lower_vertex
+               #if upper vertex is contained in an older block, no need to
+               #continue
+               if (new_max_y <= old_max_y and new_max_y >= old_min_y) and \
+                  (new_min_y <= old_max_y and new_min_y >= old_min_y):
+                  return True
+               #otherwise, switch lower vertex
+               lower_vertex = old_upper
+               found = True
+        return found
+
+    def switch_new_blocks(self):
+        self.old_blocks.extend(self.last_blocks)
+        self.last_blocks = self.new_blocks
+        self.new_blocks = []
+
+    def get_path(self):
+        self.old_blocks.extend(self.last_blocks)
         vertices = []
-        #Add lower border
-        for i in range(len(self.items)):
-            vertices.extend(([self.items[i][0], self.items[i][2]], \
-                    [self.items[i][1], self.items[i][2]]))
-        #Add upper border
-        for i in range(1,len(self.items)+1):
-            vertices.extend(([self.items[-i][1], self.items[-i][3]], \
-                    [self.items[-i][0], self.items[-i][3]]))
-        return vertices
+        coords = []
+        codes = []
+        for block in self.old_blocks:
+            vertices.extend(block.vertices)
+
+        for starting_vertex in vertices:
+            if starting_vertex.checked:
+                continue
+            starting_vertex.checked = True
+            coords.append(starting_vertex.coords)
+            codes.append(Path.MOVETO)
+            current_vertex = starting_vertex
+            while current_vertex.next_vertex != starting_vertex and not current_vertex.next_vertex.checked:
+                current_vertex = current_vertex.next_vertex
+                current_vertex.checked = True
+                coords.append(current_vertex.coords)
+                codes.append(Path.LINETO)
+            coords.append((0,0))
+            codes.append(Path.CLOSEPOLY)
+
+        return Path(coords, codes)
+
+    def merge_zone(self, zone2):
+        self.old_blocks.extend(zone2.old_blocks)
+        self.last_blocks.extend(zone2.last_blocks)
+        self.new_blocks.extend(zone2.new_blocks)
+
 
 
 # Create contour levels array (TBD: Need to be improved)
@@ -182,6 +251,7 @@ def kipp_plot(
 
    # Extract data from profiles
    max_x_coord = -1
+   min_x_coord = 1e99
    for i,profile_name in enumerate(profile_names):
        try:
            prof=ms.mesa_profile(profile_name[0], profile_name[1], num_type='profile_num')
@@ -190,7 +260,8 @@ def kipp_plot(
        x_coord = prof.header_attr.get(xaxis) / xaxis_divide
        if x_coord < max_x_coord:
            print "Profiles are not ordered in X coordinate!!!"
-       max_x_coord = max(max_x_coord,x_coord)
+       max_x_coord = max(max_x_coord, x_coord)
+       min_x_coord = min(min_x_coord, x_coord)
 
        #fill up positions
        if yaxis_normalize:
@@ -268,10 +339,6 @@ def kipp_plot(
        for history in histories:
            y_coords.extend(history.get('star_mass'))
 
-   zones = []
-   open_zones = []
-   borderTop = []
-   borderBottom = []
    mesa_mix_zones = 0
    while True:
        try:
@@ -297,10 +364,15 @@ def kipp_plot(
    else:
        tolerance = mass_tolerance
 
+   zones = []
+   open_zones = []
+   new_zones = []
    for i in range(1,len(x_coords)):
        current_x = x_coords[i]
        if current_x > max_x_coord:
            break
+       if current_x < min_x_coord:
+           continue
        previous_x = x_coords[i-1]
        for j in range(0,mesa_mix_zones):
            mix_type = mix_data[j][0][i]
@@ -313,24 +385,34 @@ def kipp_plot(
            #ignore too small regions
            if max_y_coord - min_y_coord < tolerance*y_coords[i]:
                continue
+           zone_block = Zone_Block(previous_x, current_x, min_y_coord, max_y_coord)
            exists = False
+           zones_to_merge = []
            for z in open_zones:
-               if not z.checked:
-                   if z.check_region(previous_x,current_x,min_y_coord,max_y_coord,mix_type):
-                       exists = True
-                       break
+               if z.extend(zone_block.vertices[1], zone_block.vertices[1].prev_vertex, mix_type):
+                   exists = True
+                   z.new_blocks.append(zone_block)
+                   zones_to_merge.append(z)
+           #merge zones as needed
+           for k in range(1,len(zones_to_merge)):
+               zones_to_merge[0].merge_zone(zones_to_merge[k])
+               open_zones.remove(zones_to_merge[k])
+           #create zone if it has no predecesor
            if not exists:
-               z = Zone(previous_x,current_x,min_y_coord,max_y_coord,mix_type)
-               open_zones.append(z)
+               z = Zone(zone_block, mix_type)
+               new_zones.append(z)
+       open_zones.extend(new_zones)
+       new_zones = []
        #separate zones which didn't continue here so we don't need to check them all the time
        for z in open_zones:
-           if z.checked == False:
+           z.switch_new_blocks()
+       for z in open_zones:
+           if len(z.last_blocks) == 0:
                zones.append(z)
                open_zones.remove(z)
-           else:
-               z.checked = False
 
    for z in open_zones:
+       z.switch_new_blocks()
        zones.append(z)
 
    for z in zones:
@@ -365,8 +447,8 @@ def kipp_plot(
            color = "white"
            hatch = " "
            line = 0
-       axis.add_patch(Polygon(z.get_zone_vertices(),closed=True, fill=False, hatch=hatch, edgecolor=color, linewidth=0))
-       axis.add_patch(Polygon(z.get_zone_vertices(),closed=True, fill=False, edgecolor=color, linewidth=line))
+       #axis.add_patch(Polygon(z.get_zone_vertices(),closed=True, fill=False, hatch=hatch, edgecolor=color, linewidth=0))
+       axis.add_patch(PathPatch(z.get_path(), fill=False, hatch = hatch, edgecolor=color, linewidth=line))
 
    #limit x_coords to data of contours and add line at stellar surface
    for i, x_coord in enumerate(x_coords):
@@ -374,7 +456,7 @@ def kipp_plot(
            break
    axis.plot(x_coords[:i], y_coords[:i], "k-")
 
-   return plots, histories
+   return plots, histories, [min_x_coord, max_x_coord]
 
 #Special extractors for default plots
 def nucneu_extractor(identifier, scale, prof):
@@ -487,12 +569,14 @@ def decorated_kipp_plot(
     #create plot
     fig = plt.figure()
     axis = fig.add_subplot(111)
-    plots, histories = kipp_plot(axis, logs_dir = logs_dir, profile_numbers = profile_numbers, profile_names = profile_names,
+    plots, histories, xlimits = kipp_plot(axis, logs_dir = logs_dir, profile_numbers = profile_numbers, profile_names = profile_names,
             history_names = history_names, identifiers = identifiers, extractors = extractors,
             scales = scales, contour_cmaps = contour_cmaps, levels_scale = levels_scale,
             xaxis = xaxis, xaxis_divide = xaxis_divide, xaxis_log_time = xaxis_log_time, yaxis = yaxis, yaxis_normalize = yaxis_normalize,
             show_conv = show_conv, show_therm = show_therm, show_semi = show_semi, show_over = show_over,
             show_rot = show_rot, numy = numy, mass_tolerance = mass_tolerance, radius_tolerance = radius_tolerance)
+
+    axis.set_xlim(xlimits)
 
     #add core masses
     if yaxis == "mass":

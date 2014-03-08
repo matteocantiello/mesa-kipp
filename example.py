@@ -3,7 +3,7 @@ import mkipp
 import matplotlib.pyplot as plt
 #fig = plt.figure()
 #axis = fig.add_subplot(111)    
-#plots = mkipp.kipp_plot(axis, logs_dir = "../LOGS", profile_numbers = range(1,30), \
+#plots, histories, xlimits = mkipp.kipp_plot(axis, logs_dir = "../LOGS", profile_numbers = range(1,30), \
 #        identifiers = ["eps_nuc","h1"], contour_cmaps = [plt.get_cmap("Blues"),plt.get_cmap("Oranges")], \
 #        scales = ["log", "linear"], levels = [[],[0.0,0.2,0.4,0.6,0.8,1.0]], alphas = [1.0,0.2], xaxis = "star_age")
 ##axis.set_ylim([-2,2])
@@ -13,4 +13,4 @@ import matplotlib.pyplot as plt
 #bar.set_label('h1')
 #plt.show()
 mkipp.decorated_kipp_plot(logs_dir = "../LOGS", profile_numbers = range(1,111), contour_plots = ["eps_nuc"], core_masses = ["He","C","O"], \
-        xaxis = "star_age", time_units = "Myr")
+        xaxis = "model_number", time_units = "Myr", save_file = False)
